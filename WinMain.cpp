@@ -1,17 +1,21 @@
+#define _CRT_SECURE_NO_WARNINGS
 #include <Windows.h>
-#include "Direct3D.h"
-#include "Camera.h"
-#include "Transform.h"
-#include "FBX.h"
-#include "Quad.h"
-#include "Dice.h"
-#include "Sprite.h"
+#include <cstdlib>
+#include "Engine/Direct3D.h"
+#include "Engine/Camera.h"
+#include "Engine/RootJob.h"
+#include "Engine/Input.h"
+#include "Model.h"
+#include "string"
 
 #pragma comment(lib, "d3d11.lib")//リンカ
+#pragma comment(lib, "winmm.lib")
 
 //定数宣言
 const wchar_t* WIN_CLASS_NAME = L"SampleGame";//ウィンドウクラス名
 const wchar_t* APP_NAME = L"サンプルゲーム";   //アプリケーション名
+
+RootJob* pRootJob = nullptr;//ルートジョブ(全ての親)を宣言
 
 //プロトタイプ宣言
 LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -39,8 +43,8 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInst, LPSTR lpCmdLine, 
 //(表示領域をWINDOW_WIDTHxWINDOW_HEIGHTに指定するための計算）
 	RECT winRect = { 0, 0, Direct3D::WINDOW_WIDTH, Direct3D::WINDOW_HEIGHT };
 	AdjustWindowRect(&winRect, WS_OVERLAPPEDWINDOW, FALSE);
-	int winW = winRect.right - winRect.left;     //ウィンドウ幅
-	int winH = winRect.bottom - winRect.top;     //ウィンドウ高さ
+	int winW = winRect.right - winRect.left;   //ウィンドウ幅
+	int winH = winRect.bottom - winRect.top;   //ウィンドウ高さ
 
 	//ウィンドウを作成
 	HWND hWnd = CreateWindow(
@@ -67,16 +71,13 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInst, LPSTR lpCmdLine, 
 		return 0;
 	}
 
+	//DirectInputの初期化
+	Input::Initialize(hWnd);
+
 	Camera::Initialize();
 
-	FBX fbx;
-	fbx.Load("Assets\\Oden.fbx");
-
-	if (FAILED(hr))
-	{
-		MessageBox(NULL, L"初期化に失敗", NULL, MB_OK);
-		return 0;
-	}
+	pRootJob = new RootJob(nullptr);
+	pRootJob->Initialize();
 
 	//メッセージループ（何か起きるのを待つ）
 	MSG msg;
@@ -94,21 +95,49 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInst, LPSTR lpCmdLine, 
 		//メッセージなし
 		else
 		{
+			static DWORD startTime = timeGetTime();
+			DWORD nowTime = timeGetTime();
+			static DWORD lastUpdateTime = nowTime;
+			static DWORD countFps = 0;
+			timeEndPeriod(1);
+
+			if (nowTime - startTime >= 1000) {
+				std::wstring str;
+				wsprintf(str.data(), L"%u", nowTime - startTime);
+				SetWindowTextW(hWnd, str.c_str());
+
+				countFps = 0;
+				startTime = nowTime;
+			}
+			if (nowTime - lastUpdateTime <= 1000.0f / 60.0f) 
+			{
+				continue;//1/60秒経っていないのでスルー
+			}
+			lastUpdateTime++;
+
 			//カメラを更新
 			Camera::Update();
 
-			//ゲームの処理
+			//入力情報の処理
+			Input::Update();
+			pRootJob->UpdateSub();
+
+			//描画の開始処理
 			Direct3D::BeginDraw();
-			Transform trs;
-			trs.position_ = { -1.0, -1,0 };
-			trs.rotate_ = { 0,45,0 };
-			fbx.Draw(trs);
-			//描画処理
+
+			//ルートジョブから繋がる全てのオブジェクトをDrawする
+			pRootJob->DrawSub();
+
+			//描画の終了処理
 			Direct3D::EndDraw();
 		}
 	}
 
+	Model::Release();
+	pRootJob->ReleaseSub();
+	Input::Release();
 	Direct3D::Release();
+
 	return 0;
 }
 
